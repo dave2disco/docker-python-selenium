@@ -1,4 +1,4 @@
-# 📚 Selenium Book Scraper Dashboard
+# 📚 Selenium Book Scraper
 
 Un'applicazione Python completa per lo scraping automatizzato, la memorizzazione su database relazionale e la visualizzazione in tempo reale tramite interfaccia web. Il progetto è interamente containerizzato con Docker.
 
