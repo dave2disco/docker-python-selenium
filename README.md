@@ -19,3 +19,6 @@ Un'applicazione Python completa per lo scraping automatizzato, la memorizzazione
 * **Database:** PostgreSQL 15
 * **Infrastruttura:** Docker & Docker Compose
 * **Frontend:** Bootstrap 5 (CSS) & Vanilla JavaScript
+
+## 🤖 Branch 'deploy-render' deployato su:
+**https://docker-python-selenium.onrender.com**
