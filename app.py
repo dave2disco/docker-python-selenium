@@ -13,12 +13,27 @@ SCRAPER_STATUS = {
     "total_target": 1000
 }
 
-DB_CONFIG = {
-    'host': os.getenv('DB_HOST', 'db'),
-    'database': os.getenv('DB_NAME', 'library_db'),
-    'user': os.getenv('DB_USER', 'user'),
-    'password': os.getenv('DB_PASS', 'password')
-}
+# --- CONFIGURAZIONE UNIFICATA E GENERICA ---
+def get_db_params():
+    """Raccoglie i parametri del database in modo dinamico."""
+    db_url = os.environ.get('DATABASE_URL')
+    if db_url:
+        return db_url
+    
+    return {
+        'host': os.getenv('DB_HOST', 'localhost'),
+        'database': os.getenv('DB_NAME', 'library_db'),
+        'user': os.getenv('DB_USER', 'user'),
+        'password': os.getenv('DB_PASS', 'password'),
+        'port': os.getenv('DB_PORT', '5432')
+    }
+
+def get_db_connection():
+    """Crea una connessione al database usando la configurazione unificata."""
+    params = get_db_params()
+    if isinstance(params, str):
+        return psycopg2.connect(params)
+    return psycopg2.connect(**params)
 
 HTML_TEMPLATE = """
 <!DOCTYPE html>
@@ -87,8 +102,8 @@ HTML_TEMPLATE = """
 
         async function updateUI() {
             try {
-                // 1. Recupero dati tabella
                 const dataRes = await fetch(`/api/data?page=${currentPage}&per_page=${perPage}`);
+                if (!dataRes.ok) throw new Error("Errore DB");
                 const books = await dataRes.json();
                 const tbody = document.getElementById('tableBody');
                 
@@ -104,7 +119,6 @@ HTML_TEMPLATE = """
                     `).join('');
                 }
 
-                // 2. Recupero stato globale
                 const statusRes = await fetch('/api/status');
                 const status = await statusRes.json();
                 
@@ -113,11 +127,9 @@ HTML_TEMPLATE = """
                 const countText = document.getElementById('countText');
                 const bar = document.getElementById('progressBar');
 
-                // Aggiorna contatori
                 countText.innerText = status.current_count;
                 bar.style.width = (status.current_count / 1000 * 100) + '%';
 
-                // Gestione Messaggi Alert
                 if (status.is_running) {
                     alert.className = "alert alert-info d-block";
                     alert.innerHTML = '<span class="status-running">● Scraping in corso... i dati appariranno gradualmente nelle pagine.</span>';
@@ -127,12 +139,15 @@ HTML_TEMPLATE = """
                     alert.innerHTML = '<span class="status-finished">✓ Scraping Completato! Tutti i 1000 libri sono nel database.</span>';
                     btn.disabled = false;
                     bar.classList.remove('progress-bar-animated');
+                } else if (status.last_result.startsWith("error")) {
+                    alert.className = "alert alert-danger d-block";
+                    alert.innerText = status.last_result;
+                    btn.disabled = false;
                 } else {
                     alert.classList.add('d-none');
                     btn.disabled = false;
                 }
 
-                // Gestione bottoni paginazione
                 document.getElementById('prevBtn').disabled = (currentPage === 1);
                 document.getElementById('nextBtn').disabled = (books.length < perPage);
                 document.getElementById('currentPageDisplay').innerText = currentPage;
@@ -162,9 +177,6 @@ HTML_TEMPLATE = """
 </html>
 """
 
-def get_db_connection():
-    return psycopg2.connect(**DB_CONFIG)
-
 @app.route('/')
 def index():
     return render_template_string(HTML_TEMPLATE)
@@ -175,23 +187,29 @@ def get_data():
     per_page = int(request.args.get('per_page', 20))
     offset = (page - 1) * per_page
 
-    conn = get_db_connection()
-    cur = conn.cursor()
-    cur.execute("SELECT title, price, availability FROM scraped_data ORDER BY id ASC LIMIT %s OFFSET %s", (per_page, offset))
-    rows = cur.fetchall()
-    cur.close()
-    conn.close()
-    return jsonify([{"title": r[0], "price": r[1], "availability": r[2]} for r in rows])
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor()
+        cur.execute("SELECT title, price, availability FROM scraped_data ORDER BY id ASC LIMIT %s OFFSET %s", (per_page, offset))
+        rows = cur.fetchall()
+        cur.close()
+        conn.close()
+        return jsonify([{"title": r[0], "price": r[1], "availability": r[2]} for r in rows])
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 @app.route('/api/status')
 def get_status():
-    conn = get_db_connection()
-    cur = conn.cursor()
-    cur.execute("SELECT COUNT(*) FROM scraped_data")
-    count = cur.fetchone()[0]
-    cur.close()
-    conn.close()
-    return jsonify({**SCRAPER_STATUS, "current_count": count})
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor()
+        cur.execute("SELECT COUNT(*) FROM scraped_data")
+        count = cur.fetchone()[0]
+        cur.close()
+        conn.close()
+        return jsonify({**SCRAPER_STATUS, "current_count": count})
+    except:
+        return jsonify({**SCRAPER_STATUS, "current_count": 0})
 
 @app.route('/start')
 def start():
@@ -200,7 +218,9 @@ def start():
             SCRAPER_STATUS["is_running"] = True
             SCRAPER_STATUS["last_result"] = ""
             try:
-                scraper = GenericScraper(DB_CONFIG)
+                # Passiamo la configurazione unificata allo scraper
+                scraper_config = get_db_params()
+                scraper = GenericScraper(scraper_config)
                 scraper.scrape("https://books.toscrape.com/index.html")
                 SCRAPER_STATUS["last_result"] = "finished"
             except Exception as e:
@@ -213,14 +233,19 @@ def start():
 
 @app.route('/clear', methods=['POST'])
 def clear():
-    SCRAPER_STATUS["last_result"] = ""
-    conn = get_db_connection()
-    cur = conn.cursor()
-    cur.execute("DELETE FROM scraped_data")
-    conn.commit()
-    cur.close()
-    conn.close()
-    return jsonify({"status": "cleared"})
+    try:
+        SCRAPER_STATUS["last_result"] = ""
+        conn = get_db_connection()
+        cur = conn.cursor()
+        cur.execute("DELETE FROM scraped_data")
+        conn.commit()
+        cur.close()
+        conn.close()
+        return jsonify({"status": "cleared"})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=5000)
+    # Usiamo la porta dinamica di Render o la 5000 di default
+    port = int(os.environ.get("PORT", 5000))
+    app.run(host='0.0.0.0', port=port)
