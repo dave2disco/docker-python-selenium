@@ -20,5 +20,5 @@ Un'applicazione Python completa per lo scraping automatizzato, la memorizzazione
 * **Infrastruttura:** Docker & Docker Compose
 * **Frontend:** Bootstrap 5 (CSS) & Vanilla JavaScript
 
-## 🤖 Branch 'deploy-render' deployato su:
+## 🤖 Branch `deploy-render` deployato su:
 **https://docker-python-selenium.onrender.com**
