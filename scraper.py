@@ -17,22 +17,33 @@ class GenericScraper:
         options.add_argument("--no-sandbox")
         options.add_argument("--disable-dev-shm-usage")
         options.add_argument("--disable-gpu")
-        options.binary_location = "/usr/bin/google-chrome"
+        
+        # Prova a usare il binario installato nel Dockerfile se esiste
+        if os.path.exists("/usr/bin/google-chrome"):
+            options.binary_location = "/usr/bin/google-chrome"
         
         service = Service(ChromeDriverManager().install())
         return webdriver.Chrome(service=service, options=options)
 
     def save_to_db(self, data):
+        conn = None
         try:
-            conn = psycopg2.connect(**self.db_config)
+            # Se db_config è una stringa (DATABASE_URL), la usa direttamente
+            if isinstance(self.db_config, str):
+                conn = psycopg2.connect(self.db_config)
+            else:
+                conn = psycopg2.connect(**self.db_config)
+                
             cur = conn.cursor()
             query = "INSERT INTO scraped_data (title, price, availability) VALUES (%s, %s, %s)"
             cur.executemany(query, data)
             conn.commit()
             cur.close()
-            conn.close()
         except Exception as e:
-            print(f"Errore DB: {e}")
+            print(f"Errore DB nello scraper: {e}")
+        finally:
+            if conn:
+                conn.close()
 
     def scrape(self, start_url):
         print(f"Avvio scraping: {start_url}")
@@ -50,14 +61,14 @@ class GenericScraper:
 
             if results:
                 self.save_to_db(results)
-                print(f"Salvati {len(results)} libri dalla pagina corrente.")
+                print(f"Salvati {len(results)} libri.")
 
             try:
                 next_btn = self.driver.find_element(By.CLASS_NAME, "next").find_element(By.TAG_NAME, "a")
                 next_url = next_btn.get_attribute("href")
                 self.driver.get(next_url)
             except:
-                print("Scraping completato: nessuna altra pagina trovata.")
+                print("Fine pagine.")
                 break
 
         self.driver.quit()
